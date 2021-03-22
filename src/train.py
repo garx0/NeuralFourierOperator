@@ -3,7 +3,6 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 import os
 from timeit import default_timer
-import sys
 
 
 def lp_loss_relative(true, pred, p=2, reduction='mean'):
@@ -40,6 +39,8 @@ class Trainer:
                 self.prepare_grids()
         elif predictive_mode == 'multiple_step':
             basic_step = self.multiple_step_prediction
+        elif predictive_mode == 'unet_step':
+            basic_step = self.unet_step
         else:
             raise ValueError(f'Unsupported predictive mode: {predictive_mode}')
 
@@ -87,13 +88,26 @@ class Trainer:
         loss = self.criterion(labels, predictions)
         return loss, predictions
 
+    def unet_step(self, inputs, labels):
+        predictions = torch.empty_like(labels)
+        if self.training:
+            for t in range(self.t_out):
+                predictions[..., t] = self.net(inputs[..., t].unsqueeze(1)).squeeze()
+        else:
+            predictions[..., 0] = self.net(inputs[..., 0].unsqueeze(1)).squeeze()
+            for t in range(1, self.t_out):
+                predictions[..., t] = self.net(predictions[..., t-1].unsqueeze(1)).squeeze()
+
+        loss = self.criterion(labels, predictions)
+
+        return loss, predictions
+
     def train_step(self, inputs, labels):
         self.net.train()
+        self.training = True
         loss, predict = self.basic_step(inputs, labels)
         self.optimizer.zero_grad()
         loss.backward()
-        # l2_full = criterion(predict, yy)
-        # l2_full.backward()
         self.optimizer.step()
 
         return loss
@@ -101,6 +115,7 @@ class Trainer:
     @torch.no_grad()
     def test(self, dataloader):
         self.net.eval()
+        self.training = False
         test_l2_step = 0
         test_l2_full = 0
         for inputs, labels in dataloader:
@@ -112,7 +127,6 @@ class Trainer:
         return test_l2_full
 
     def train(self):
-        self.net.train()
         n_train, n_test = len(self.train_loader), len(self.val_loader)
         for epoch in range(self.n_epochs):
             t1 = default_timer()
@@ -129,8 +143,6 @@ class Trainer:
             self.writer.add_scalar('train_loss', loss_train.item() / n_train, epoch)
             self.writer.add_scalar('val_loss', loss_val.item() / n_test, epoch)
             print(f'Epoch: {epoch} time: {epoch_time}, train_loss: {loss_train.item() / n_train}, val_loss: {loss_val.item() / n_test}')
-            sys.stdout.flush()
-            sys.stderr.flush()
 
         self.save_model(epoch)
 

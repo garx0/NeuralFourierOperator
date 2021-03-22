@@ -1,11 +1,22 @@
 import torch
 from neural_fourier import FourierNet2d, FourierNet3d, SpatialNet2d
+from unet import UNet
 from train import Trainer
 from data import Data
 from utils import parse_args, dump_config, mkdirs
 import sys
 from contextlib import redirect_stdout
 import os
+import random
+import numpy as np
+
+
+def fix_seed(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def get_default_args():
@@ -35,7 +46,8 @@ def get_default_args():
         "seed": 42,
         "device": "cuda",
         "experiments": "../experiments",
-        "datasets": "../datasets"
+        "datasets": "../datasets",
+        "make_deterministic": "false"
     }
 
     return default_args
@@ -61,9 +73,16 @@ def main():
     elif args['net_arch'] == '2d_spatial':
         net_class = SpatialNet2d
         n_modes = -1
-        kwargs = {'kernel_size' : args['kernel_size'], 'padding': args['padding']}
+        kwargs = {'kernel_size': args['kernel_size'], 'padding': args['padding']}
+    elif args['net_arch'] == 'unet':
+        net_class = UNet
+        n_modes = -1
+        kwargs = {'kernel_size': args['kernel_size'], 'padding': args['padding']}
     else:
         raise ValueError(f'Unknown net_arch: {args["net_arch"]}')
+
+    if args['make_deterministic'] == 'true':
+        fix_seed(args['seed'])
 
     net = net_class(args['n_layers'], n_modes, args['width'], args['t_in'], args['t_out'],
                     args['pad_coordinates'] == "true", **kwargs).to(args['device'])

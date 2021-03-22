@@ -75,6 +75,18 @@ class PadCoordinates3d(object):
         return input, label
 
 
+class ContiniousRandomCut(object):
+    def __init__(self, t_in, t_out):
+        self.t_in = t_in
+        self.t_out = t_out
+
+    def __call__(self, sample):
+        t_in, t_out = self.t_in, self.t_out
+        sample = torch.cat(sample, dim=-1)
+        start = np.random.randint(t_in - 1)
+        return sample[:, :, start:start+t_out], sample[:, :, start+1:start+t_out+1]
+
+
 class PDEDataset(torch_data.Dataset):
     def __init__(self, path, ids, l, input_time_len, transform=None):
         super(PDEDataset, self).__init__()
@@ -142,6 +154,9 @@ class Data(object):
                 basic_transforms.append(PadCoordinates2d(self.S))
             elif self.net_arch == "3d":
                 basic_transforms.append(PadCoordinates3d(self.S, self.t_out))
+
+        if self.predictive_mode == 'unet_step':
+            basic_transforms.append(ContiniousRandomCut(self.t_in, self.t_out))
 
         transforms_train = transforms.Compose(basic_transforms)
         transforms_val = transforms.Compose(basic_transforms)
