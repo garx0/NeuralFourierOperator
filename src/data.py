@@ -18,7 +18,12 @@ class Downsample(object):
     def __call__(self, sample):
         input, label = sample
         s, t = self.s, self.t
-        return input[::s, ::s, ::t], label[::s, ::s, ::t]
+        if t == 1:
+            return input[::s, ::s, ::t], label[::s, ::s, ::t]
+        else:
+            t_in = input.shape[-1]
+            concat_sub = np.concatenate((input[::s, ::s, :], label[::s, ::s, :]), axis=-1)[:, :, ::t]
+            return concat_sub[:, :, :t_in], concat_sub[:, :, t_in:]
 
 
 class NumOutTimesteps(object):
