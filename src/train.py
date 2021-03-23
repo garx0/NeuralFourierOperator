@@ -90,7 +90,7 @@ class Trainer:
 
     def unet_step(self, inputs, labels):
         predictions = torch.empty_like(labels)
-        if self.training:
+        if self.training and self.unet_mode == 'robust':
             for t in range(self.t_out):
                 predictions[..., t] = self.net(inputs[..., t].unsqueeze(1)).squeeze()
         else:

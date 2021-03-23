@@ -1,5 +1,5 @@
 import torch
-from neural_fourier import FourierNet2d, FourierNet3d, SpatialNet2d
+from neural_fourier import FourierNet1d, FourierNet2d, FourierNet3d, SpatialNet2d
 from unet import UNet
 from train import Trainer
 from data import Data
@@ -62,7 +62,11 @@ def main():
     mkdirs(command, args)
     dump_config(command, args)
 
-    if args['net_arch'] == '2d':
+    if args['net_arch'] == '1d':
+        net_class = FourierNet1d
+        n_modes = (args['n_modes_x'])
+        kwargs = {}
+    elif args['net_arch'] == '2d':
         net_class = FourierNet2d
         n_modes = (args['n_modes_x'], args['n_modes_y'])
         kwargs = {}

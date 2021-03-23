@@ -1,5 +1,4 @@
 import json
-from shutil import copy
 import os
 
 

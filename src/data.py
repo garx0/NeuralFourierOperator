@@ -16,14 +16,12 @@ class Downsample(object):
         self.t = t
 
     def __call__(self, sample):
-        input, label = sample
+        print(sample.shape)
+        shape, ndim = sample.shape, sample.ndim
         s, t = self.s, self.t
-        if t == 1:
-            return input[::s, ::s, ::t], label[::s, ::s, ::t]
-        else:
-            t_in = input.shape[-1]
-            concat_sub = np.concatenate((input[::s, ::s, :], label[::s, ::s, :]), axis=-1)[:, :, ::t]
-            return concat_sub[:, :, :t_in], concat_sub[:, :, t_in:]
+        slices = [slice(0, shape[i], s) for i in range(ndim - 1)]
+        slices.append(slice(0, shape[ndim-1], t))
+        return sample[tuple(slices)]
 
 
 class NumOutTimesteps(object):
@@ -33,7 +31,7 @@ class NumOutTimesteps(object):
     def __call__(self, sample):
         input, label = sample
         t_out = self.t_out
-        return input, label[:, :, :t_out]
+        return input, label[..., :t_out]
 
 
 class OutTimestepsRepeat(object):
@@ -47,10 +45,21 @@ class OutTimestepsRepeat(object):
         return input, label
 
 
+class PadCoordinates1d(object):
+    def __init__(self, S):
+        self.S = S
+        self.padding = torch.linspace(0, 1, S, dtype=torch.float32).reshape(S, 1)
+
+    def __call__(self, sample):
+        input, label = sample
+        input = torch.cat((self.padding, input), dim=-1)
+        return input, label
+
+
 class PadCoordinates2d(object):
     def __init__(self, S):
         self.S = S
-        self.padding = torch.zeros(S, S, 2, dtype=torch.float32)
+        self.padding = torch.empty(S, S, 2, dtype=torch.float32)
         self.padding[:, :, 0] = torch.linspace(0, 1, S, dtype=torch.float32).reshape(S, 1)
         self.padding[:, :, 1] = torch.linspace(0, 1, S, dtype=torch.float32).reshape(1, S)
 
@@ -64,7 +73,7 @@ class PadCoordinates3d(object):
     def __init__(self, S, t_out):
         self.S = S
         self.t_out = t_out
-        self.padding = torch.zeros(S, S, t_out, 3, dtype=torch.float32)
+        self.padding = torch.empty(S, S, t_out, 3, dtype=torch.float32)
         self.padding[:, :, :, 0] = torch.linspace(0, 1, S,       dtype=torch.float32)    .reshape(S, 1, 1)
         self.padding[:, :, :, 1] = torch.linspace(0, 1, S,       dtype=torch.float32)    .reshape(1, S, 1)
         self.padding[:, :, :, 2] = torch.linspace(0, 1, t_out+1, dtype=torch.float32)[1:].reshape(1, 1, t_out)
@@ -84,25 +93,27 @@ class ContiniousRandomCut(object):
         t_in, t_out = self.t_in, self.t_out
         sample = torch.cat(sample, dim=-1)
         start = np.random.randint(t_in - 1)
-        return sample[:, :, start:start+t_out], sample[:, :, start+1:start+t_out+1]
+        return sample[..., start:start+t_out], sample[..., start+1:start+t_out+1]
 
 
 class PDEDataset(torch_data.Dataset):
-    def __init__(self, path, ids, l, input_time_len, transform=None):
+    def __init__(self, path, ids, l, t_in, downsampler, transform=None):
         super(PDEDataset, self).__init__()
         self.path = path
         self.ids = ids
         self.transform = transform
         self.l = l
-        self.input_time_len = input_time_len
+        self.t_in = t_in
+        self.downsampler = downsampler
 
     def __len__(self):
         return len(self.ids)
 
     def __getitem__(self, idx):
         solution = np.load(os.path.join(self.path, f"solution_{str(self.ids[idx]).rjust(self.l, '0')}.npy"))
-        input_time_len = self.input_time_len
-        input, label = solution[..., :input_time_len], solution[..., input_time_len:]
+        solution = self.downsampler(solution)
+        t_in = self.t_in
+        input, label = solution[..., :t_in], solution[..., t_in:]
         if self.transform is not None:
             input, label = self.transform((input, label))
 
@@ -141,7 +152,6 @@ class Data(object):
 
     def get_transforms(self):
         basic_transforms = [
-            Downsample(self.s, self.t),
             NumOutTimesteps(self.t_out),
             ToTensor()
         ]
@@ -150,7 +160,9 @@ class Data(object):
             basic_transforms.append(OutTimestepsRepeat(self.t_out))
 
         if self.pad_coordinates == 'true':
-            if self.net_arch == "2d" or self.net_arch == "2d_spatial":
+            if self.net_arch == "1d":
+                basic_transforms.append(PadCoordinates1d(self.S))
+            elif self.net_arch == "2d" or self.net_arch == "2d_spatial":
                 basic_transforms.append(PadCoordinates2d(self.S))
             elif self.net_arch == "3d":
                 basic_transforms.append(PadCoordinates3d(self.S, self.t_out))
@@ -186,17 +198,18 @@ class Data(object):
         train_ids, val_ids, test_ids = self.get_ids()
         train_dataloader, val_dataloader, test_dataloader = None, None, None
         transforms_train, transforms_val, transforms_test = self.get_transforms()
+        downsampler = Downsample(self.s, self.t)
 
         if len(train_ids) > 0:
-            train_dataset = PDEDataset(self.path, train_ids, l, self.t_in, transforms_train)
+            train_dataset = PDEDataset(self.path, train_ids, l, self.t_in, downsampler, transforms_train)
             train_dataloader = torch_data.DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
 
         if len(val_ids) > 0:
-            val_dataset = PDEDataset(self.path, val_ids, l, self.t_in, transforms_val)
+            val_dataset = PDEDataset(self.path, val_ids, l, self.t_in, downsampler, transforms_val)
             val_dataloader = torch_data.DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
 
         if len(test_ids) > 0:
-            test_dataset = PDEDataset(self.path, test_ids, l, self.t_in, transforms_test)
+            test_dataset = PDEDataset(self.path, test_ids, l, self.t_in, downsampler, transforms_test)
             test_dataloader = torch_data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
 
         return train_dataloader, val_dataloader, test_dataloader
