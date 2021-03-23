@@ -16,9 +16,11 @@ class Downsample(object):
         self.t = t
 
     def __call__(self, sample):
-        input, label = sample
+        shape, ndim = sample.shape, sample.ndim
         s, t = self.s, self.t
-        return input[::s, ::s, ::t], label[::s, ::s, ::t]
+        slices = [slice(0, shape[i], s) for i in range(ndim - 1)]
+        slices.append(slice(0, shape[ndim-1], t))
+        return sample[slices]
 
 
 class NumOutTimesteps(object):
@@ -94,21 +96,23 @@ class ContiniousRandomCut(object):
 
 
 class PDEDataset(torch_data.Dataset):
-    def __init__(self, path, ids, l, input_time_len, transform=None):
+    def __init__(self, path, ids, l, t_in, downsampler, transform=None):
         super(PDEDataset, self).__init__()
         self.path = path
         self.ids = ids
         self.transform = transform
         self.l = l
-        self.input_time_len = input_time_len
+        self.t_in = t_in
+        self.downsampler = downsampler
 
     def __len__(self):
         return len(self.ids)
 
     def __getitem__(self, idx):
         solution = np.load(os.path.join(self.path, f"solution_{str(self.ids[idx]).rjust(self.l, '0')}.npy"))
-        input_time_len = self.input_time_len
-        input, label = solution[..., :input_time_len], solution[..., input_time_len:]
+        solution = self.downsampler(solution)
+        t_in = self.t_in
+        input, label = solution[..., :t_in], solution[..., t_in:]
         if self.transform is not None:
             input, label = self.transform((input, label))
 
@@ -194,17 +198,18 @@ class Data(object):
         train_ids, val_ids, test_ids = self.get_ids()
         train_dataloader, val_dataloader, test_dataloader = None, None, None
         transforms_train, transforms_val, transforms_test = self.get_transforms()
+        downsampler = Downsample(self.s, self.t)
 
         if len(train_ids) > 0:
-            train_dataset = PDEDataset(self.path, train_ids, l, self.t_in, transforms_train)
+            train_dataset = PDEDataset(self.path, train_ids, l, self.t_in, downsampler, transforms_train)
             train_dataloader = torch_data.DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
 
         if len(val_ids) > 0:
-            val_dataset = PDEDataset(self.path, val_ids, l, self.t_in, transforms_val)
+            val_dataset = PDEDataset(self.path, val_ids, l, self.t_in, downsampler, transforms_val)
             val_dataloader = torch_data.DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
 
         if len(test_ids) > 0:
-            test_dataset = PDEDataset(self.path, test_ids, l, self.t_in, transforms_test)
+            test_dataset = PDEDataset(self.path, test_ids, l, self.t_in, downsampler, transforms_test)
             test_dataloader = torch_data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
 
         return train_dataloader, val_dataloader, test_dataloader
