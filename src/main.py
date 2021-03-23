@@ -86,14 +86,14 @@ def main():
         raise ValueError(f'Unknown net_arch: {args["net_arch"]}')
 
     if args['predictive_mode'] == 'multiple_step':
-        net_t_out = args['t_out']
+        t_out = args['t_out']
     elif args['predictive_mode'] == 'one_step':
-        net_t_out = args['step']
+        t_out = args['step']
 
     if args['make_deterministic'] == 'true':
         fix_seed(args['seed'])
 
-    net = net_class(args['n_layers'], n_modes, args['width'], args['t_in'], net_t_out,
+    net = net_class(args['n_layers'], n_modes, args['width'], args['t_in'], t_out,
                     args['pad_coordinates'] == "true", **kwargs).to(args['device'])
     optimizer = torch.optim.Adam(net.parameters(), lr=args['learning_rate'], weight_decay=args['weight_decay'])
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args['scheduler_step'], gamma=args['scheduler_gamma'])
