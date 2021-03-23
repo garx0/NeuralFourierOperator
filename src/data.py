@@ -16,11 +16,12 @@ class Downsample(object):
         self.t = t
 
     def __call__(self, sample):
+        print(sample.shape)
         shape, ndim = sample.shape, sample.ndim
         s, t = self.s, self.t
         slices = [slice(0, shape[i], s) for i in range(ndim - 1)]
         slices.append(slice(0, shape[ndim-1], t))
-        return sample[slices]
+        return sample[tuple(slices)]
 
 
 class NumOutTimesteps(object):
@@ -151,7 +152,6 @@ class Data(object):
 
     def get_transforms(self):
         basic_transforms = [
-            Downsample(self.s, self.t),
             NumOutTimesteps(self.t_out),
             ToTensor()
         ]
